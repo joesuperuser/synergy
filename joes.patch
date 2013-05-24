@@ -1,0 +1,220 @@
+diff -crB synergy/src/lib/server/CServer.cpp modified/src/lib/server/CServer.cpp
+*** synergy/src/lib/server/CServer.cpp  Fri May 24 10:49:16 2013
+--- modified/src/lib/server/CServer.cpp Fri May 24 10:50:43 2013
+***************
+*** 37,46 ****
+--- 37,109 ----
+  #include <cstdlib>
+  #include "CScreen.h"
+  
++ /* joe.s - need to keep track of slave display and current display.
++    there's probably a method/function/something that has this info
++    I just don't know where it is. I poked around for a couple weeks
++    trying to figure it out but failed. So here are two pointers which
++    get free()'d in CServerApp.cpp on program cleanup.
++ 
++    whenever CServer::adoptClient(client) is called, *SlaveName is malloc()'ed
++    and getName(client).c_str() is saved to it.  This will obviously only work
++    for one connected client. If you have multiple, you will need to modify
++    the code yourself to use a list of connected clients... or figure out how 
++    all this mess of code works and re-implement correctly :)
++ 
++    whenever CServer::switchScreen() is called, *CurDisplay is checked
++    for null. if null, malloc() is called on it. If *CurDisplay is not
++    null, realloc() is called as I didn't want to assume the config file
++    has not changed and been re-read somehow.  The current display name is 
++    obtained from getName(dst) and strcpy() is called to save it to *CurDisplay.
++    This updates on every switchScreen().
++ 
++    After copying, SlaveName is checked for null. If not null, a strcmp() is done
++    to see if CurDisplay and Slavename are equal. If they are the same, this means
++    we are on the slave display (via mouse) and CServer::enableActionsOnPrimaryScreen()
++    is called to enable the primary client, which enabled hotkeys from config file
++    (at least as far as I can tell. There is *FAR* more code here than there is 
++    documentation).  IF CurDisplay and SlaveName are not equal, then the method
++    CServer::disableActionsOnPrimaryScreen() is called to disable the hotkeys from
++    the config file. 
++ 
++    I am not clear on how all this code works. There may be side affects.  It seems
++    to work the way I want. My requests for information on #synergy were basically
++    ignored (soooo typical of IRC) so I just really don't care anymore. hopefully
++    this is enough of a jumpstart to get the bug fixed properly.
++ */
++ char *SlaveName;
++ char *CurDisplay;
++ 
+  //
+  // CServer
+  //
+  
++ 
++ /* joe.s - here we enable the primary client again as mouse has moved from
++    slave screen, to primary */
++ bool CServer::enableActionsOnPrimaryScreen (void)
++ {
++       LOG((CLOG_INFO "Enabling actions on Primary screen"));
++    // enable primary client
++    m_primaryClient->enable();
++    m_inputFilter->setPrimaryClient(m_primaryClient);
++ }
++ 
++ 
++ /* joe.s - disable hotkey actions by disabling primary client and setting 
++    inputfilter to NULL.  When primary screen is active again, we will enable
++    the primary client by calling enableActionsOnPrimaryScreen()  */
++ bool CServer::disableActionsOnPrimaryScreen(void)
++ {
++       LOG((CLOG_INFO "Disabling actions on Primary screen"));
++ 
++    // remove input filter
++    m_primaryClient->disable();
++    m_inputFilter->setPrimaryClient(NULL);
++ 
++    // tell primary screen about reconfiguration
++    m_primaryClient->reconfigure(getActivePrimarySides());
++ }
++ 
+  CEvent::Type                  CServer::s_errorEvent         = CEvent::kUnknown;
+  CEvent::Type                  CServer::s_connectedEvent     = CEvent::kUnknown;
+  CEvent::Type                  CServer::s_disconnectedEvent  = CEvent::kUnknown;
+***************
+*** 324,329 ****
+--- 387,408 ----
+        }
+        LOG((CLOG_NOTE "client \"%s\" has connected", getName(client).c_str()));
+  
++    // joe.s - save connected client to SlaveName -- obviously more than one client will break this
++    CString name = getName(client).c_str();
++    int len = name.length();
++ 
++    // joe.s - only allocate and save first client. ignore others
++    if (!SlaveName)
++    {
++       SlaveName = (char *)malloc (len);
++       strncpy (SlaveName, name.c_str(), len);
++          LOG((CLOG_NOTE "client %s is now SlaveName", SlaveName));
++     }
++     else
++     {
++          LOG((CLOG_NOTE "found client %s but already saved %s to SlaveName",  getName(client).c_str(), SlaveName));
++     }
++ 
+        // send configuration options to client
+        sendOptions(client);
+  
+***************
+*** 519,524 ****
+--- 598,647 ----
+  
+        LOG((CLOG_INFO "switch from \"%s\" to \"%s\" at %d,%d", getName(m_active).c_str(), getName(dst).c_str(), x, y));
+  
++    /* joe.s - save curdisplay and if check if slave has been allocated yet. if it has, compare to see
++       what screen we are on to determine enabling/disabling hotkeys */ 
++    CString curdisplay = getName(dst);
++    int len = curdisplay.length();
++ 
++    // joe.s - setup char* CurDisplay if not allocated already
++    if (CurDisplay)
++    {
++          LOG((CLOG_INFO "already allocated curdisplay for %s. calling realloc()", CurDisplay));
++       CurDisplay = (char *)realloc ((char *)CurDisplay, len);
++    }
++    else
++    {
++          LOG((CLOG_INFO "allocating curdisplay for %s.", CurDisplay));
++       CurDisplay = (char *)malloc (len);
++    }
++ 
++    // joe.s - save current display to CurDisplay and compare SlaveName (if not null) to see if we are on slave or server
++    if (CurDisplay)
++    {
++       strncpy (CurDisplay, curdisplay.c_str(), len);
++       if (SlaveName)
++      {
++            LOG((CLOG_INFO "   slave is %s CurDisplay is %s.", SlaveName, CurDisplay));
++ 
++         // on slave screen so reactivate handlers
++         if ( (strcmp(CurDisplay, SlaveName) == 0))
++         {
++               LOG((CLOG_INFO "      Active display is %s. Enable hotkeys.", CurDisplay));
++            enableActionsOnPrimaryScreen();
++         }
++         else  // deactivate hotkey handlers on server
++         {
++               LOG((CLOG_INFO "      Active display is Server %s. Disable hotkeys.", CurDisplay));
++            disableActionsOnPrimaryScreen();
++         }
++      }
++    }
++   else
++   {
++         LOG((CLOG_WARN "!! Unable to allocated %d bytes for CurDisplay !!", len));
++   }
++ 
++ 
+        // stop waiting to switch
+        stopSwitch();
+  
+diff -crB synergy/src/lib/server/CServer.h modified/src/lib/server/CServer.h
+*** synergy/src/lib/server/CServer.h    Fri May 24 10:49:16 2013
+--- modified/src/lib/server/CServer.h   Fri May 24 10:51:18 2013
+***************
+*** 31,36 ****
+--- 31,41 ----
+  #include "stdvector.h"
+  #include "INode.h"
+  
++ // joe.s - globals for current and slave display
++ extern char *SlaveName;
++ extern char *CurDisplay;
++ 
++ 
+  class CBaseClientProxy;
+  class CEventQueueTimer;
+  class CPrimaryClient;
+***************
+*** 111,116 ****
+--- 116,126 ----
+        //! @name manipulators
+        //@{
+  
++    /*! joe.s - disable all actions (hotkey defs in config file) from primary screen when mouse moves to primary screen. */
++    bool disableActionsOnPrimaryScreen (void);
++    /*! joe.s - ...enable them again when mouse moves over to slave screen */
++    bool enableActionsOnPrimaryScreen (void); // joe.s
++ 
+        //! Set configuration
+        /*!
+        Change the server's configuration.  Returns true iff the new
+diff -crB synergy/src/lib/synergy/CServerApp.cpp modified/src/lib/synergy/CServerApp.cpp
+*** synergy/src/lib/synergy/CServerApp.cpp      Fri May 24 10:49:16 2013
+--- modified/src/lib/synergy/CServerApp.cpp     Fri May 24 10:51:49 2013
+***************
+*** 457,462 ****
+--- 457,469 ----
+        assert(s_primaryClient == NULL);
+        assert(s_serverScreen == NULL);
+        assert(s_serverState == kUninitialized);
++ 
++    // joe.s - free our global char* vars here
++    LOG((CLOG_INFO "free()'ing evil globals"));
++    if (SlaveName)
++       free (SlaveName);
++    if (CurDisplay)
++       free (CurDisplay);
+  }
+  
+  void
+diff -crB synergy/tools/CMakeLists.txt modified/tools/CMakeLists.txt
+*** synergy/tools/CMakeLists.txt        Fri May 24 10:49:17 2013
+--- modified/tools/CMakeLists.txt       Fri May 24 08:26:46 2013
+***************
+*** 28,33 ****
+--- 28,34 ----
+        ${cpp_dir}/polynomi.cpp
+        ${cpp_dir}/eprecomp.cpp
+        ${cpp_dir}/eccrypto.cpp
++    ${cpp_dir}/test.cpp
+        ${cpp_dir}/algebra.cpp)
+  list(REMOVE_ITEM cpp_src ${cpp_ignore})
+  
