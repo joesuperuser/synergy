@@ -1,6 +1,27 @@
-diff -crB synergy/src/lib/server/CServer.cpp modified/src/lib/server/CServer.cpp
-*** synergy/src/lib/server/CServer.cpp  Fri May 24 10:49:16 2013
---- modified/src/lib/server/CServer.cpp Fri May 24 10:50:43 2013
+diff -crB '--exclude=.svn' synergy/src/lib/platform/COSXScreen.cpp modified/src/lib/platform/COSXScreen.cpp
+*** synergy/src/lib/platform/COSXScreen.cpp     Tue May 28 13:15:19 2013
+--- modified/src/lib/platform/COSXScreen.cpp    Tue May 28 14:33:15 2013
+***************
+*** 790,795 ****
+--- 790,804 ----
+  COSXScreen::enter()
+  {
+        showCursor();
++    // joe.s - disable mac scren saver if active
++    LOG((CLOG_INFO "enter mac screen, disable saver"));
++ 
++    io_registry_entry_t entry = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/IOResources/IODisplayWrangler");
++    if (entry != MACH_PORT_NULL)
++    {
++       IORegistryEntrySetCFProperty(entry, CFSTR("IORequestIdle"), kCFBooleanFalse);
++       IOObjectRelease(entry);
++     }
+  
+        if (m_isPrimary) {
+                CGSetLocalEventsSuppressionInterval(0.0);
+diff -crB '--exclude=.svn' synergy/src/lib/server/CServer.cpp modified/src/lib/server/CServer.cpp
+*** synergy/src/lib/server/CServer.cpp  Tue May 28 13:15:19 2013
+--- modified/src/lib/server/CServer.cpp Tue May 28 12:51:04 2013
 ***************
 *** 37,46 ****
 --- 37,109 ----
@@ -50,7 +71,7 @@ diff -crB synergy/src/lib/server/CServer.cpp modified/src/lib/server/CServer.cpp
 + 
 + /* joe.s - here we enable the primary client again as mouse has moved from
 +    slave screen, to primary */
-+ bool CServer::enableActionsOnPrimaryScreen (void)
++ void CServer::enableActionsOnPrimaryScreen (void)
 + {
 +       LOG((CLOG_INFO "Enabling actions on Primary screen"));
 +    // enable primary client
@@ -62,7 +83,7 @@ diff -crB synergy/src/lib/server/CServer.cpp modified/src/lib/server/CServer.cpp
 + /* joe.s - disable hotkey actions by disabling primary client and setting 
 +    inputfilter to NULL.  When primary screen is active again, we will enable
 +    the primary client by calling enableActionsOnPrimaryScreen()  */
-+ bool CServer::disableActionsOnPrimaryScreen(void)
++ void CServer::disableActionsOnPrimaryScreen(void)
 + {
 +       LOG((CLOG_INFO "Disabling actions on Primary screen"));
 + 
@@ -155,9 +176,9 @@ diff -crB synergy/src/lib/server/CServer.cpp modified/src/lib/server/CServer.cpp
         // stop waiting to switch
         stopSwitch();
   
-diff -crB synergy/src/lib/server/CServer.h modified/src/lib/server/CServer.h
-*** synergy/src/lib/server/CServer.h    Fri May 24 10:49:16 2013
---- modified/src/lib/server/CServer.h   Fri May 24 10:51:18 2013
+diff -crB '--exclude=.svn' synergy/src/lib/server/CServer.h modified/src/lib/server/CServer.h
+*** synergy/src/lib/server/CServer.h    Tue May 28 13:15:19 2013
+--- modified/src/lib/server/CServer.h   Tue May 28 12:51:31 2013
 ***************
 *** 31,36 ****
 --- 31,41 ----
@@ -179,15 +200,15 @@ diff -crB synergy/src/lib/server/CServer.h modified/src/lib/server/CServer.h
         //@{
   
 +    /*! joe.s - disable all actions (hotkey defs in config file) from primary screen when mouse moves to primary screen. */
-+    bool disableActionsOnPrimaryScreen (void);
++    void           disableActionsOnPrimaryScreen (void);
 +    /*! joe.s - ...enable them again when mouse moves over to slave screen */
-+    bool enableActionsOnPrimaryScreen (void); // joe.s
++    void           enableActionsOnPrimaryScreen (void); // joe.s
 + 
         //! Set configuration
         /*!
         Change the server's configuration.  Returns true iff the new
-diff -crB synergy/src/lib/synergy/CServerApp.cpp modified/src/lib/synergy/CServerApp.cpp
-*** synergy/src/lib/synergy/CServerApp.cpp      Fri May 24 10:49:16 2013
+diff -crB '--exclude=.svn' synergy/src/lib/synergy/CServerApp.cpp modified/src/lib/synergy/CServerApp.cpp
+*** synergy/src/lib/synergy/CServerApp.cpp      Tue May 28 13:15:18 2013
 --- modified/src/lib/synergy/CServerApp.cpp     Fri May 24 10:51:49 2013
 ***************
 *** 457,462 ****
@@ -205,8 +226,8 @@ diff -crB synergy/src/lib/synergy/CServerApp.cpp modified/src/lib/synergy/CServe
   }
   
   void
-diff -crB synergy/tools/CMakeLists.txt modified/tools/CMakeLists.txt
-*** synergy/tools/CMakeLists.txt        Fri May 24 10:49:17 2013
+diff -crB '--exclude=.svn' synergy/tools/CMakeLists.txt modified/tools/CMakeLists.txt
+*** synergy/tools/CMakeLists.txt        Tue May 28 13:15:23 2013
 --- modified/tools/CMakeLists.txt       Fri May 24 08:26:46 2013
 ***************
 *** 28,33 ****
@@ -218,3 +239,7 @@ diff -crB synergy/tools/CMakeLists.txt modified/tools/CMakeLists.txt
         ${cpp_dir}/algebra.cpp)
   list(REMOVE_ITEM cpp_src ${cpp_ignore})
   
+Only in synergy/tools/build: __init__.pyc
+Only in synergy/tools/build: ftputil.pyc
+Only in synergy/tools/build: generators.pyc
+Only in synergy/tools/build: toolchain.pyc
